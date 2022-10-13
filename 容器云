@@ -1,0 +1,162 @@
+# 传入centos和iaas镜像
+# 修改对应节点主机名
+hostnamectl set-hostname master
+hostnamectl set-hostname node1
+hostnamectl set-hostname node2
+hostnamectl set-hostname harbor
+bash
+
+# 所有节点添加并保持ip和主机名映射
+vi /etc/hosts
+x.x.x.x master
+x.x.x.x node1
+x.x.x.x node2
+x.x.x.x harbor
+
+
+# 所有节点删除旧的repo文件
+rm -rf /etc/yum.repos.d/*
+
+# master
+mkdir /opt/{centos,pass}
+mount CentOS... /opt/centos/
+mount br... /opt/pass
+# 进行持久化挂载
+vi /etc/fstab
+/root/CentOS... /opt/centos iso9660 default 0 0
+/root/br... /opt/centos iso9660 default 0 0
+:wq
+
+# master配置yum源
+vi /etc/yum.repos.d/centos.repo
+[centos]
+name=centos
+baseurl=file:///opt/centos
+gpgcheck=0
+enabled=1
+[paas]
+name=paas
+baseurl=file:///opt/paas/kubernetes-repo
+gpgcheck=0
+enabled=1
+:wq
+
+# 配置ftp并开放/opt目录
+yum install -y vsftpd
+vi /etc/vsftpd/vsftpd.conf
+anon_root=/opt
+
+systemctl start vsftpd
+systemctl enable vsftpd
+
+# master
+cp -rf /opt/paas/[^*repo] /opt
+
+# 给非master节点配yum源
+vi /etc/yum.repos.d/centos.repo
+[centos]
+name=centos
+baseurl=ftp://x.x.x.x/centos
+gpgcheck=0
+enabled=1
+[paas]
+name=paas
+baseurl=ftp://x.x.x.x/paas/kubernetes-repo
+gpgcheck=0
+enabled=1
+
+# 所有节点互相配置免密
+ssh-keygen
+ssh-copy-id root@{node{1,2},harbor}
+
+# 将k8s镜像传入harbor节点
+# 挂载到/mnt
+mount br... /mnt
+# cp到/opt
+cp -rvf /mnt/* /opt
+
+# 修改脚本
+# 将harbor上时间同步移动到master上，用node脚本替换原来的harbor时间同步
+# 将harbor上初始化到安装docker-ce复制到master脚本docker-compose前
+# 修改master脚本所有仓库ip为harbor-ip
+
+# 给node节点传脚本
+scp /opt/k8s_install_node.sh root@node{1,2}
+
+# 安装harbor
+# harbor
+/opt/k8s_harbor_install.sh
+# 等待完成···
+
+
+# 安装push
+# harbor
+/opt/k8s_image_push.sh
+# 输入镜像仓库、用户名、、
+# 等待完成···
+
+# 安装master
+# master
+/opt/k8s_master_install.sh
+# 等待完成···
+
+# 安装node
+# node{1,2}
+/opt/k8s_node_install.sh
+# 输入镜像仓库、用户名、、
+# 等待完成···
+# 等待完成···
+
+
+# harbor节点查看docker版本
+docker version
+
+# harbor查看deamon
+cat /etc/docker/deamon.json
+
+# master节点，查看docker-ce版本
+docker-compose version
+
+# master&node查询kubeadm安装是否正确
+rpm -qa | grep kubeadm
+
+# 查看集群状态
+kubectl get nodes
+
+# node节点，查看从仓库拉取的镜像
+docker image
+
+# master
+kubectl get ns
+kubectl get pods -n kube-system
+
+# master
+kubectl get nodes
+
+# harbor
+mkdir /root/mysql
+cd /root/mysql
+# 查找镜像
+docker image |grep mysql
+# 编写dockerfile及相关配置
+vi Dockerfile
+~~~
+:wq
+vi init.sh
+~~~
+:wq
+
+---
+docker [command]
+docker image |grep none                                     # 查找none镜像
+docker rmi -f {{img-id}}                                    # 删除指定镜像
+docker build -t {{img-name}} .                              # 构建容器
+docker login {{ip}}                                         # 登录
+docker tag img-id {{url(harbor-ip/library/img-name)}}       # 打标签,镜像规格标签
+docker push {{harbor-ip/library/img-name}}                  # 上传镜像
+docker pull {{harbor-ip/library/img-name}}                  # 拉取镜像
+docker inspect {{docker-name}}                              # 查看详情
+docker-compose up -d                                        # 启动容器
+docker-compose ps                                           # 查看容器
+docker exec -it {{docker-name}} bash                        # 进入容器
+---
